@@ -76,6 +76,17 @@ namespace Stickies_Window
             Controls.Add(bar);
 
             Bounds = new Rectangle(d.X, d.Y, Math.Max(d.Width, S(120)), Math.Max(d.Height, S(60)));
+
+            // If the note is off every screen, move it back onto the main screen
+            bool onScreen = false;
+            var grab = new Rectangle(Left, Top, Width, S(TitleBar.H));
+            foreach (Screen sc in Screen.AllScreens)
+                if (sc.WorkingArea.IntersectsWith(grab)) onScreen = true;
+            if (!onScreen)
+            {
+                Rectangle wa = Screen.PrimaryScreen.WorkingArea;
+                Location = new Point(wa.Left + S(80), wa.Top + S(80));
+            }
             expandedHeight = Height;
 
             string path = Store.RtfPath(d.Id);
