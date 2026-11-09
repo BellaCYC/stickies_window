@@ -10,6 +10,10 @@ if not exist "%CSC%" (
   exit /b 1
 )
 
+rem Close any running copy so the .exe can be replaced
+taskkill /im Stickies_Window.exe /f >nul 2>&1
+timeout /t 1 /nobreak >nul
+
 cd /d "%~dp0"
 "%CSC%" /nologo /target:winexe /optimize+ /out:Stickies_Window.exe ^
   /r:System.dll /r:System.Core.dll /r:System.Drawing.dll ^

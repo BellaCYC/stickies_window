@@ -12,8 +12,8 @@ namespace Stickies_Window
     {
         [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
 
-        const string MutexName = "Stickies_Window-SingleInstance-7f3a";
-        public const string ShowEventName = "Stickies_Window-ShowNotes-7f3a";
+        const string MutexName = "Stickies_Window-SingleInstance-v2";
+        public const string ShowEventName = "Stickies_Window-ShowNotes-v2";
 
         [STAThread]
         static void Main()
@@ -41,6 +41,18 @@ namespace Stickies_Window
                     return;
                 }
 
+                // We are the only real copy: close any old stuck copies left from older versions
+                try
+                {
+                    var me = System.Diagnostics.Process.GetCurrentProcess();
+                    foreach (var p in System.Diagnostics.Process.GetProcessesByName(me.ProcessName))
+                    {
+                        if (p.Id == me.Id) continue;
+                        try { p.Kill(); p.WaitForExit(3000); } catch { }
+                    }
+                }
+                catch { }
+
                 // Any crash shows a message instead of closing silently
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
                 Application.ThreadException += (s, e) => ShowError(e.Exception);
@@ -49,7 +61,9 @@ namespace Stickies_Window
                 try
                 {
                     try { SetProcessDPIAware(); } catch { }
+                    Log.Write("start");
                     Application.Run(new NoteManager());
+                    Log.Write("exit");
                 }
                 catch (Exception ex) { ShowError(ex); }
             }
@@ -65,8 +79,24 @@ namespace Stickies_Window
                 System.IO.File.WriteAllText(System.IO.Path.Combine(Store.Folder, "error.txt"), msg);
             }
             catch { }
+            Log.Write("error: " + msg);
             MessageBox.Show("Stickies_Window hit an error:\n\n" + msg, "Stickies_Window",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    // Small log in the notes folder, to find problems
+    static class Log
+    {
+        public static void Write(string line)
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(Store.Folder);
+                System.IO.File.AppendAllText(System.IO.Path.Combine(Store.Folder, "log.txt"),
+                    DateTime.Now.ToString("HH:mm:ss") + "  " + line + Environment.NewLine);
+            }
+            catch { }
         }
     }
 
@@ -86,6 +116,7 @@ namespace Stickies_Window
         {
             Instance = this;
             Data = Store.Load();
+            Log.Write("loaded " + Data.Notes.Count + " notes");
 
             // Opening the app again brings all notes to the front
             uiThread.CreateControl();
@@ -118,6 +149,7 @@ namespace Stickies_Window
 
             foreach (var d in Data.Notes.ToList()) Open(d, false);
             if (notes.Count == 0) NewNote();
+            Log.Write("ready, " + notes.Count + " notes open");
 
             // Save everything when Windows shuts down or you sign out
             Microsoft.Win32.SystemEvents.SessionEnding += (s, e) => SaveAll();
@@ -156,6 +188,7 @@ namespace Stickies_Window
         // Deletes a note for good
         public void Remove(NoteForm f)
         {
+            Log.Write("note deleted:\n" + Environment.StackTrace);
             notes.Remove(f);
             Data.Notes.Remove(f.Data);
             Store.Delete(f.Data.Id);
