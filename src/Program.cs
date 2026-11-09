@@ -12,18 +12,61 @@ namespace Stickies_Window
     {
         [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
 
+        const string MutexName = "Stickies_Window-SingleInstance-7f3a";
+        public const string ShowEventName = "Stickies_Window-ShowNotes-7f3a";
+
         [STAThread]
         static void Main()
         {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
             bool firstInstance;
-            using (var mutex = new System.Threading.Mutex(true, "Stickies_Window-SingleInstance-7f3a", out firstInstance))
+            using (var mutex = new System.Threading.Mutex(true, MutexName, out firstInstance))
             {
-                if (!firstInstance) return;
-                try { SetProcessDPIAware(); } catch { }
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new NoteManager());
+                // Already running: ask that copy to show its notes
+                if (!firstInstance)
+                {
+                    try
+                    {
+                        using (var ev = System.Threading.EventWaitHandle.OpenExisting(ShowEventName)) ev.Set();
+                    }
+                    catch
+                    {
+                        MessageBox.Show(
+                            "Stickies_Window is already running but not responding.\n\n" +
+                            "Open Task Manager, end \"Stickies_Window\", then open it again.",
+                            "Stickies_Window", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    return;
+                }
+
+                // Any crash shows a message instead of closing silently
+                Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+                Application.ThreadException += (s, e) => ShowError(e.Exception);
+                AppDomain.CurrentDomain.UnhandledException += (s, e) => ShowError(e.ExceptionObject as Exception);
+
+                try
+                {
+                    try { SetProcessDPIAware(); } catch { }
+                    Application.Run(new NoteManager());
+                }
+                catch (Exception ex) { ShowError(ex); }
             }
+        }
+
+        // Shows the error and saves it to error.txt in the notes folder
+        static void ShowError(Exception ex)
+        {
+            string msg = ex == null ? "Unknown error" : ex.ToString();
+            try
+            {
+                System.IO.Directory.CreateDirectory(Store.Folder);
+                System.IO.File.WriteAllText(System.IO.Path.Combine(Store.Folder, "error.txt"), msg);
+            }
+            catch { }
+            MessageBox.Show("Stickies_Window hit an error:\n\n" + msg, "Stickies_Window",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -36,11 +79,22 @@ namespace Stickies_Window
         readonly List<NoteForm> notes = new List<NoteForm>();
         readonly NotifyIcon tray;
         readonly System.Windows.Forms.Timer saveTimer;
+        readonly Control uiThread = new Control();
+        readonly System.Threading.EventWaitHandle showEvent;
 
         public NoteManager()
         {
             Instance = this;
             Data = Store.Load();
+
+            // Opening the app again brings all notes to the front
+            uiThread.CreateControl();
+            showEvent = new System.Threading.EventWaitHandle(false,
+                System.Threading.EventResetMode.AutoReset, Program.ShowEventName);
+            System.Threading.ThreadPool.RegisterWaitForSingleObject(showEvent, (st, timedOut) =>
+            {
+                try { uiThread.BeginInvoke((Action)BringAllToFront); } catch { }
+            }, null, -1, false);
 
             saveTimer = new System.Windows.Forms.Timer();
             saveTimer.Interval = 800;
